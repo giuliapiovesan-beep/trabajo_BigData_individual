@@ -1,0 +1,263 @@
+---
+title: "Analisis de la brecha de genero en el salario y en el empleo"  #- título
+date: today              #- ISO8601 YYYY-MM-DD format 
+date-format: short
+format: 
+  revealjs:
+    scrollable: true
+    slide-level: 2
+    height: 900
+    width: 1600
+    toc: false
+    center-title-slide: true
+    title-slide-attributes: #- atributos para la slide de titulo
+      data-background-color: "#562457"   #- color de R-ladies
+    preview-links: auto  #- true: abre un iframe en lugar de abrir ventana
+    link-external-newwindow: true
+    transition: fade
+    fontcolor: "#262d36"
+    highlight-style: a11y
+    code-line-numbers: true
+    code-fold: true
+    number-sections: false
+    slide-number: c/t  
+    incremental: false   
+footer: |
+  Slides hechas con [Quarto](https://quarto.org/) 
+#theme: moon
+---
+
+# Librerías
+
+```{r}
+#| echo: true
+#| message: false
+#| warning: false
+
+library("eurostat")
+library(tidyverse)
+library(sf)
+library(magrittr)
+library(dplyr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+```
+
+# Primera parte: Analisis de la brecha de género en el salario
+## Proceso de obtención y preparación de los datos
+```{r}
+#| echo: true
+#| message: false
+#| warning: false
+
+aa <- search_eurostat("all")
+
+# select some data from Eurostat
+my_table <- "earn_gr_goeg"
+
+label_eurostat_tables(my_table)  
+
+#dowloading the selected data with get_eurostat()
+df <- get_eurostat(my_table, time_format = 'raw', keepFlags = TRUE)       #- downloads the table from Eurostat API
+
+#- obtenemos los descriptores de los códigos de las variables
+df_names <- names(df)
+df <- label_eurostat(df, code = df_names, fix_duplicated = TRUE)
+rm(aa,  df_names, my_table)
+
+#clean df con: geo, year, value.
+df_work <- df %>%
+  mutate(
+    year  = as.integer(TIME_PERIOD),
+    value = as.numeric(values)
+  ) %>%
+  select(geo_code, geo, year, value)
+
+# pais con el max gap, el min y la media:
+
+df_2018 <- df_work %>% filter(year == 2018)
+
+gap_summary_ue <- df_2018  %>%
+  summarise(
+  max_gap   = max(value, na.rm = TRUE),
+  min_gap   = min(value, na.rm = TRUE),
+  mean_gap  = mean(value, na.rm = TRUE)
+)
+
+gap_summary_ue
+```
+## Primer gráfico: diferencias salariales entre los paises europeos
+```{r}
+#| echo: true
+#| message: false
+#| warning: false
+
+library(ggplot2)
+library(tidyverse)
+library(ggplot2)
+
+
+g1  <- ggplot(df_2018, aes(
+  x = reorder(geo, value),
+  y = value
+)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Brecha salarial en los piases UE (2018)",
+    x = "Pais",
+    y = "Gap (%)"
+  ) +
+  theme_minimal()
+
+print(g1)
+```
+
+## Segundo grafico: en comparación con la media europea
+```{r}
+#- segundo gráfico
+mean_ue_2018 <- df_2018 %>%
+  summarise(mean_gap = mean(value, na.rm = TRUE)) %>%
+  pull(mean_gap)
+
+g2 <- ggplot(df_2018, aes(
+  x = reorder(geo, value),
+  y = value,
+  fill = geo_code %in% c("IT", "ES")
+)) +
+  geom_col() +
+  geom_hline(
+    yintercept = mean_ue_2018,
+    linetype = "dashed",
+    linewidth = 1
+  ) +
+  coord_flip() +
+  labs(
+    title = "Brecha salarial en los piases UE (2018)",
+    subtitle = "Línea discontinua = media de la UE",
+    x = "Paese",
+    y = "Gap (%)"
+  ) +
+  theme_minimal() +
+  guides(fill = "none")
+
+print(g2)
+```
+## Tercer Grafico: Ida ITA vs ES 
+
+```{r}
+#- tercer gráfico
+
+#ida italia vs spain
+df_it_es <- df_work %>%
+  filter(geo_code %in% c("IT", "ES"))
+
+# grafico temporale
+g_it_es <- ggplot(df_it_es, aes(
+  x = year,
+  y = value,
+  color = geo
+)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Ida gender pay gap: Italia e Espana",
+    subtitle = "valores nel tiempo",
+    x = "Ano",
+    y = "Gap (%)",
+    color = "Pais"
+  ) +
+  theme_minimal()
+
+print(g_it_es)
+
+```
+
+# Segunda parte: Analisis de la brecha de género en el empleo
+## Tabla variaciones a largo plazo 
+```{r}
+library(dplyr)
+library(DT)
+
+summary_by_geo <- df_work %>%
+  group_by(geo) %>%
+  summarise(
+    year_min = min(year),
+    year_max = max(year),
+    mean_value = mean(value),
+    sd_value   = sd(value),
+    min_value  = min(value),
+    max_value  = max(value),
+    value_first = value[which.min(year)],
+    value_last  = value[which.max(year)],
+    delta_total = value_last - value_first,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(value_last))
+
+DT::datatable(
+  summary_by_geo,
+  caption = "Resumen por país: evolución y variación de largo plazo del indicador",
+  options = list(
+    pageLength = 10,
+    autoWidth = TRUE
+  )
+)
+```
+## Primer gráfico: tendencia media anual del indicador para los países europeos
+```{r}
+eu_trend <- df_work %>%
+  filter(!geo %in% c("EU27_2020","EA20")) %>%
+  group_by(year) %>%
+  summarise(
+    mean_value = mean(value),
+    .groups = "drop"
+  )
+
+ggplot(eu_trend, aes(x = year, y = mean_value)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "tendencia media del indicador en los países europeos",
+    x = "Ano",
+    y = "valor promedio"
+  ) +
+  theme_minimal()
+```
+## Segundo grafico: nivel actual del indicador con su variación a largo plazo
+```{r}
+summary_plot <- summary_by_geo %>%
+  filter(!geo %in% c("EU27_2020","EA20"))
+
+ggplot(summary_plot, aes(x = delta_total, y = value_last, label = geo)) +
+  geom_hline(yintercept = median(summary_plot$value_last), linetype = "dashed") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(size = 2) +
+  ggrepel::geom_text_repel(size = 3, max.overlaps = 15) +
+  labs(
+    title = "Nivel actual vs. cambio a largo plazo",
+    x = "Delta total (ultimo - primo)",
+    y = "Valor ultimo ano disponible"
+  ) +
+  theme_minimal()
+```
+## Tercer Grafico: Distribución durante el último año disponible
+```{r}
+last_year <- max(df_work$year)
+
+df_last <- df_work %>%
+  filter(year == last_year) %>%
+  filter(!geo %in% c("EU27_2020","EA20")) %>%
+  arrange(desc(value))
+
+ggplot(df_last, aes(x = reorder(geo, value), y = value)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = paste(" Distribución durante el último año disponible (", last_year, ")", sep = ""),
+    x = "Pais",
+    y = "valor"
+  ) +
+  theme_minimal()
+```
